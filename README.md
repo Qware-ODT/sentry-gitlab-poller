@@ -56,9 +56,32 @@ GITLAB_API_URL=您的_GITLAB_API_URL
 
 ## 使用方法
 
-執行服務：
+### 直接執行
+
 ```bash
 node index.js
+```
+
+### 使用 Docker（推薦）
+
+1. 建立 Docker 映像檔：
+```bash
+docker-compose build
+```
+
+2. 啟動服務：
+```bash
+docker-compose up -d
+```
+
+3. 查看記錄：
+```bash
+docker-compose logs -f
+```
+
+4. 停止服務：
+```bash
+docker-compose down
 ```
 
 服務啟動後會：

@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  sentry-gitlab-poller:
+    build: .
+    container_name: sentry-gitlab-poller
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./processed-issues.json:/app/processed-issues.json
