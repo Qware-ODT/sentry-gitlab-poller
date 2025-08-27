@@ -2,7 +2,10 @@
 
 這是一個自動化工具，用於將 Sentry 的錯誤議題（Issues）同步到 GitLab 的議題追蹤系統。
 
-## 功能特點
+## 主要功能
+
+### 1. 自動同步 Sentry Issues
+透過 `index.js` 實現的功能：
 
 - 自動從 Sentry 擷取新的錯誤議題
 - 自動在 GitLab 建立對應的議題
@@ -74,10 +77,44 @@ node index.js
   - Sentry 連結
   - 影響統計（事件數和使用者數）
 
+## 議題管理工具
+
+專案包含一個額外的議題管理工具 `cleanup-issues.js`，用於批次關閉 GitLab issues。
+
+### 使用方式
+
+1. 關閉單個或多個特定 ID 的議題：
+```bash
+node cleanup-issues.js --ids 123,456,789
+```
+
+2. 關閉一個範圍內的議題：
+```bash
+node cleanup-issues.js --ids 44-240
+```
+
+3. 混合使用（同時指定範圍和單個 ID）：
+```bash
+node cleanup-issues.js --ids 44-240,300,350-400
+```
+
+### 功能說明
+- 支援單個 ID、多個 ID 和 ID 範圍的組合
+- 自動處理錯誤並繼續執行其他 ID
+- 顯示詳細的執行進度和結果
+- 支援內部 GitLab（含自簽憑證）
+
+### 執行結果
+- 會顯示每個被關閉的議題 ID
+- 最後會顯示成功關閉的總數
+- 如果發生錯誤會顯示詳細的錯誤資訊
+
 ## 注意事項
 
 1. 如果使用自架的 GitLab，請確保：
    - 設定正確的 GitLab API URL
    - 如果使用自簽憑證，程式已設定忽略 SSL 驗證
-2. 確保 GitLab Token 具有建立議題的權限
+2. 確保 GitLab Token 具有：
+   - 建立議題的權限（用於 index.js）
+   - 關閉議題的權限（用於 cleanup-issues.js）
 3. Sentry Token 需要具有讀取議題的權限

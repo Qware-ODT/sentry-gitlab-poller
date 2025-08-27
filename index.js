@@ -1,9 +1,12 @@
 require('dotenv').config();
 const axios = require('axios');
 const schedule = require('node-schedule');
+const fs = require('fs');
+const path = require('path');
 
 class SentryGitLabPoller {
   constructor() {
+    this.processedIssuesFile = path.join(__dirname, 'processed-issues.json');
     this.sentryClient = axios.create({
       baseURL: 'https://sentry.io/api/0/',
       headers: {
@@ -23,8 +26,51 @@ class SentryGitLabPoller {
       })
     });
 
-    // 用於儲存已處理的 Sentry issue
-    this.processedIssues = new Set();
+    // 載入已處理的 issues
+    this.loadProcessedIssues();
+  }
+
+  loadProcessedIssues() {
+    try {
+      if (fs.existsSync(this.processedIssuesFile)) {
+        const data = fs.readFileSync(this.processedIssuesFile, 'utf8');
+        this.processedIssues = JSON.parse(data).processedIssues || {};
+      } else {
+        this.processedIssues = {};
+      }
+    } catch (error) {
+      console.error('載入已處理 issues 時發生錯誤:', error);
+      this.processedIssues = {};
+    }
+  }
+
+  saveProcessedIssues() {
+    try {
+      fs.writeFileSync(
+        this.processedIssuesFile,
+        JSON.stringify({ processedIssues: this.processedIssues }, null, 2),
+        'utf8'
+      );
+    } catch (error) {
+      console.error('儲存已處理 issues 時發生錯誤:', error);
+    }
+  }
+
+  isIssueProcessed(sentryIssue) {
+    const processedIssue = this.processedIssues[sentryIssue.id];
+    if (!processedIssue) return false;
+
+    // 如果 issue 的最後更新時間比我們記錄的更新時間新，就重新處理
+    return new Date(sentryIssue.lastSeen) <= new Date(processedIssue.lastSeen);
+  }
+
+  updateProcessedIssue(sentryIssue, gitlabIssueId) {
+    this.processedIssues[sentryIssue.id] = {
+      gitlabIssueId,
+      lastSeen: sentryIssue.lastSeen,
+      lastProcessed: new Date().toISOString()
+    };
+    this.saveProcessedIssues();
   }
 
   async fetchSentryIssues() {
@@ -50,6 +96,12 @@ class SentryGitLabPoller {
   }
 
   async createGitLabIssue(sentryIssue) {
+    // 檢查是否已經處理過此 issue
+    if (this.isIssueProcessed(sentryIssue)) {
+      console.log(`Issue ${sentryIssue.id} 已經處理過且沒有更新，跳過`);
+      return;
+    }
+
     const issueData = {
       title: `[Sentry] ${sentryIssue.title}`,
       description: this.formatGitLabDescription(sentryIssue),
@@ -60,8 +112,11 @@ class SentryGitLabPoller {
       console.log('正在嘗試建立 GitLab issue...');
       console.log('GitLab API URL:', `${process.env.GITLAB_API_URL}/projects/${process.env.GITLAB_PROJECT_ID}/issues`);
       
-      await this.gitlabClient.post(`/projects/${process.env.GITLAB_PROJECT_ID}/issues`, issueData);
+      const response = await this.gitlabClient.post(`/projects/${process.env.GITLAB_PROJECT_ID}/issues`, issueData);
       console.log(`已建立 GitLab issue: ${issueData.title}`);
+      
+      // 記錄已處理的 issue
+      this.updateProcessedIssue(sentryIssue, response.data.id);
     } catch (error) {
       console.error('建立 GitLab issue 時發生錯誤:', {
         message: error.message,
@@ -101,12 +156,10 @@ ${sentryIssue.title}
     
     try {
       const issues = await this.fetchSentryIssues();
+      console.log(`從 Sentry 擷取到 ${issues.length} 個 issues`);
       
       for (const issue of issues) {
-        if (!this.processedIssues.has(issue.id)) {
-          await this.createGitLabIssue(issue);
-          this.processedIssues.add(issue.id);
-        }
+        await this.createGitLabIssue(issue);
       }
     } catch (error) {
       console.error('輪詢過程中發生錯誤:', error.message);
@@ -114,19 +167,36 @@ ${sentryIssue.title}
   }
 
   start() {
-    console.log('服務已啟動，將在每天 09:00、12:00、18:00 執行檢查');
+    const now = new Date();
+    console.log('服務已啟動');
+    console.log('排程設定：');
+    console.log('- 09:00 每日檢查');
+    console.log('- 12:00 每日檢查');
+    console.log('- 18:00 每日檢查');
     
     // 設定排程時間
-    const schedules = ['0 9 * * *', '0 12 * * *', '0 18 * * *'];
+    const schedules = [
+      { time: '0 9 * * *', desc: '09:00' },
+      { time: '0 12 * * *', desc: '12:00' },
+      { time: '0 18 * * *', desc: '18:00' }
+    ];
     
-    schedules.forEach(cronTime => {
-      schedule.scheduleJob(cronTime, () => {
-        console.log(`開始執行排程檢查 - ${new Date().toLocaleString()}`);
+    schedules.forEach(({ time, desc }) => {
+      const job = schedule.scheduleJob(time, () => {
+        const execTime = new Date();
+        console.log(`\n[${execTime.toLocaleString()}] 執行 ${desc} 的排程檢查`);
         this.poll();
       });
+
+      if (job) {
+        const nextRun = job.nextInvocation();
+        console.log(`下次 ${desc} 執行時間: ${nextRun.toLocaleString()}`);
+      } else {
+        console.error(`警告: ${desc} 的排程設定失敗`);
+      }
     });
 
-    // 立即執行一次初始檢查
+    console.log('\n正在執行初始檢查...');
     this.poll();
   }
 }
