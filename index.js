@@ -76,7 +76,7 @@ class SentryGitLabPoller {
   async fetchSentryIssues() {
     try {
       console.log('正在嘗試從 Sentry 擷取資料...');
-      const endpoint = `projects/${process.env.SENTRY_ORG}/${process.env.SENTRY_PROJECT}/issues/`;
+      const endpoint = `projects/${process.env.SENTRY_ORG}/${process.env.SENTRY_PROJECT}/issues/?status=unresolved`;
       console.log('使用的 Sentry API 端點:', endpoint);
       const response = await this.sentryClient.get(endpoint);
       return response.data;
