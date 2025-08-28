@@ -1,22 +1,38 @@
 # Sentry-GitLab Issue 同步工具
 
-這是一個自動化工具，用於將 Sentry 的錯誤議題（Issues）同步到 GitLab 的議題追蹤系統。
+## 功能說明
 
-## 主要功能
+1. 自動同步 Sentry Issues 到 GitLab：
+   - 每天固定時間（09:00、12:00、18:00）自動檢查
+   - 從 Sentry 擷取新的 issues
+   - 在 GitLab 建立對應的 issues
+   - 自動加上標籤：'sentry' 和 'bug'
 
-### 1. 自動同步 Sentry Issues
-透過 `index.js` 實現的功能：
+2. 智慧追蹤功能：
+   - 避免重複建立相同的 issues
+   - 追蹤 Sentry issues 的更新狀態
+   - 當 Sentry issue 解決時，自動關閉對應的 GitLab issue
+      1. 檢查 GitLab issue 是否存在
+      2. 處理已關閉的 issue 狀態
+      3. 自動清理不存在的 issue 記錄
 
-- 自動從 Sentry 擷取新的錯誤議題
-- 自動在 GitLab 建立對應的議題
-- 包含詳細的錯誤資訊和 Sentry 連結
-- 固定排程執行（預設為每天 09:00、12:00、18:00）
-- 避免重複建立相同的議題
+      程式邏輯流程如下：
+      1. 當發現 Sentry issue 已解決時：
+        - 先檢查對應的 GitLab issue 是否存在
+        - 如果存在且未關閉，則關閉它
+        - 如果已關閉，則跳過
+        - 如果不存在，則從追蹤記錄中移除
+  
+      2. 錯誤處理：
+        - 404：表示 issue 不存在，自動清理記錄
+        - 其他錯誤：顯示詳細錯誤訊息
 
-## 必要條件
 
-- Node.js 版本 >= 14
-- Sentry 專案的存取權限
+
+## 系統需求
+
+- Node.js 18 或以上版本
+- 有效的 Sentry API 存取權杖
 - GitLab 專案的存取權限
 
 ## 安裝步驟
@@ -62,14 +78,14 @@ GITLAB_API_URL=您的_GITLAB_API_URL
 node index.js
 ```
 
-### 使用 Docker（推薦）
+### 使用 Docker
 
-1. 建立 Docker 映像檔：
+1. 建立 Docker (強制重新建構 image)：
 ```bash
 docker-compose build
 ```
 
-2. 啟動服務：
+2. 啟動服務 (使用剛建好的 image 啟動 container)：
 ```bash
 docker-compose up -d
 ```
@@ -84,60 +100,80 @@ docker-compose logs -f
 docker-compose down
 ```
 
-服務啟動後會：
-1. 立即執行一次初始檢查
-2. 在設定的排程時間（09:00、12:00、18:00）自動執行檢查
+## 功能細節
 
-## 輸出的 GitLab 議題格式
+### 自動同步處理
+- 服務啟動時會立即執行一次初始檢查
+- 在設定的排程時間（09:00、12:00、18:00）自動執行檢查
+- 每次檢查會同時處理：
+  1. 未解決的 issues：建立新的 GitLab issues
+  2. 已解決的 issues：關閉對應的 GitLab issues
 
-每個自動建立的 GitLab 議題將包含：
-- 標題：`[Sentry] 原始錯誤標題`
-- 標籤：`sentry`, `bug`
-- 詳細資訊：
-  - Issue ID
-  - 發生時間（首次和最後）
-  - 錯誤訊息
-  - Sentry 連結
-  - 影響統計（事件數和使用者數）
-
-## 議題管理工具
-
-專案包含一個額外的議題管理工具 `cleanup-issues.js`，用於批次關閉 GitLab issues。
-
-### 使用方式
-
-1. 關閉單個或多個特定 ID 的議題：
-```bash
-node cleanup-issues.js --ids 123,456,789
-```
-
-2. 關閉一個範圍內的議題：
-```bash
-node cleanup-issues.js --ids 44-240
-```
-
-3. 混合使用（同時指定範圍和單個 ID）：
-```bash
-node cleanup-issues.js --ids 44-240,300,350-400
-```
-
-### 功能說明
-- 支援單個 ID、多個 ID 和 ID 範圍的組合
-- 自動處理錯誤並繼續執行其他 ID
-- 顯示詳細的執行進度和結果
-- 支援內部 GitLab（含自簽憑證）
-
-### 執行結果
-- 會顯示每個被關閉的議題 ID
-- 最後會顯示成功關閉的總數
-- 如果發生錯誤會顯示詳細的錯誤資訊
+### GitLab Issue 格式
+每個建立的 GitLab issue 包含：
+- 標題前綴 "[Sentry]"
+- Issue ID
+- 發生時間（首次和最後）
+- 錯誤訊息
+- Sentry 連結
+- 影響統計（事件數和使用者數）
 
 ## 注意事項
 
-1. 如果使用自架的 GitLab，請確保：
-   - 設定正確的 GitLab API URL
-   - 如果使用自簽憑證，程式已設定忽略 SSL 驗證
-2. 確保 GitLab Token 具有：
-   - 建立議題的權限（用於 index.js）
-   - 關閉議題的權限（用於 cleanup-issues.js）
-3. Sentry Token 需要具有讀取議題的權限
+1. 確保環境變數正確設定
+2. GitLab API Token 需要有建立和關閉 issue 的權限
+3. 對於內部網路的 GitLab，程式已設定忽略 SSL 驗證
+4. 建議使用 Docker 執行以確保環境一致性
+5. 記錄檔會顯示所有同步操作的狀態
+
+## 疑難排解
+
+如果遇到問題，請檢查：
+1. 環境變數是否正確設定
+2. 網路連線狀態
+3. API 權限是否足夠
+4. Docker 記錄檔中的錯誤訊息
+
+## 程式碼更新流程>Docker操作說明
+
+1. 如果只修改了環境變數 (.env)：
+```bash
+# 重新啟動容器即可
+docker-compose restart
+```
+
+2. 如果修改了程式碼 (*.js)：
+```bash
+# 停止並移除現有容器
+docker-compose down
+
+# 重新建構映像檔
+docker-compose build
+
+# 啟動新容器
+docker-compose up -d
+```
+
+> 在 Docker Desktop 的圖形化介面（Docker Desktop GUI）裡沒辦法直接操作
+
+
+### 常見更新情境
+
+1. 環境變數更新
+   - 修改 `.env` 檔案後只需重新啟動容器
+   - 使用 `docker-compose restart`
+
+2. 程式碼更新
+   - 需要重新建構映像檔
+   - 使用完整的 down-build-up 流程
+
+3. 相依套件更新
+   - 需要重新建構映像檔
+   - 使用完整的 down-build-up 流程
+
+### 注意事項
+
+- 使用 `docker-compose down` 不會刪除已處理的記錄檔
+- 重新建構映像檔會確保所有更改都被正確應用
+- 建議定期查看記錄檔確認更新是否成功
+

@@ -76,10 +76,20 @@ class SentryGitLabPoller {
   async fetchSentryIssues() {
     try {
       console.log('正在嘗試從 Sentry 擷取資料...');
-      const endpoint = `projects/${process.env.SENTRY_ORG}/${process.env.SENTRY_PROJECT}/issues/?status=unresolved`;
-      console.log('使用的 Sentry API 端點:', endpoint);
-      const response = await this.sentryClient.get(endpoint);
-      return response.data;
+      // 取得未解決的 issues
+      const unresolved = await this.sentryClient.get(
+        `projects/${process.env.SENTRY_ORG}/${process.env.SENTRY_PROJECT}/issues/?status=unresolved`
+      );
+      
+      // 取得已解決的 issues
+      const resolved = await this.sentryClient.get(
+        `projects/${process.env.SENTRY_ORG}/${process.env.SENTRY_PROJECT}/issues/?status=resolved`
+      );
+      
+      return {
+        unresolved: unresolved.data,
+        resolved: resolved.data
+      };
     } catch (error) {
       console.error('從 Sentry 擷取 issue 時發生錯誤:', {
         message: error.message,
@@ -91,7 +101,7 @@ class SentryGitLabPoller {
       if (error.response?.data) {
         console.error('錯誤詳細資訊:', error.response.data);
       }
-      return [];
+      return { unresolved: [], resolved: [] };
     }
   }
 
@@ -130,6 +140,59 @@ class SentryGitLabPoller {
     }
   }
 
+  async closeGitLabIssue(gitlabIssueId) {
+    try {
+      // 先檢查 issue 是否存在
+      const checkResponse = await this.gitlabClient.get(
+        `/projects/${process.env.GITLAB_PROJECT_ID}/issues/${gitlabIssueId}`
+      );
+      
+      // 如果 issue 已經是關閉狀態，就不需要再關閉
+      if (checkResponse.data.state === 'closed') {
+        console.log(`GitLab issue ${gitlabIssueId} 已經是關閉狀態`);
+        return true;
+      }
+
+      // 關閉 issue
+      await this.gitlabClient.put(
+        `/projects/${process.env.GITLAB_PROJECT_ID}/issues/${gitlabIssueId}`,
+        { state_event: 'close' }
+      );
+      
+      console.log(`已關閉 GitLab issue: ${gitlabIssueId}`);
+      return true;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.log(`GitLab issue ${gitlabIssueId} 不存在，將從追蹤記錄中移除`);
+        // 從追蹤記錄中移除不存在的 issue
+        for (const sentryId in this.processedIssues) {
+          if (this.processedIssues[sentryId].gitlabIssueId === gitlabIssueId) {
+            delete this.processedIssues[sentryId];
+            this.saveProcessedIssues();
+            break;
+          }
+        }
+      } else {
+        console.error(`關閉 GitLab issue ${gitlabIssueId} 時發生錯誤:`, {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText
+        });
+      }
+      return false;
+    }
+  }
+
+  async handleResolvedIssues(resolvedIssues) {
+    console.log('處理已解決的 Sentry issues...');
+    for (const issue of resolvedIssues) {
+      const processedIssue = this.processedIssues[issue.id];
+      if (processedIssue && processedIssue.gitlabIssueId) {
+        await this.closeGitLabIssue(processedIssue.gitlabIssueId);
+      }
+    }
+  }
+
   formatGitLabDescription(sentryIssue) {
     return `
 ## Sentry Issue 詳細資訊
@@ -155,12 +218,17 @@ ${sentryIssue.title}
     console.log('開始輪詢 Sentry issues...');
     
     try {
-      const issues = await this.fetchSentryIssues();
-      console.log(`從 Sentry 擷取到 ${issues.length} 個 issues`);
+      const { unresolved, resolved } = await this.fetchSentryIssues();
+      console.log(`從 Sentry 擷取到 ${unresolved.length} 個未解決 issues`);
+      console.log(`從 Sentry 擷取到 ${resolved.length} 個已解決 issues`);
       
-      for (const issue of issues) {
+      // 處理未解決的 issues
+      for (const issue of unresolved) {
         await this.createGitLabIssue(issue);
       }
+      
+      // 處理已解決的 issues
+      await this.handleResolvedIssues(resolved);
     } catch (error) {
       console.error('輪詢過程中發生錯誤:', error.message);
     }
